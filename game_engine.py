@@ -46,6 +46,35 @@ class GameEngine:
         # Font for text
         self.font = pygame.font.Font(None, 36)
         self.small_font = pygame.font.Font(None, 24)
+        
+        # Load images with fallback
+        self.player_image = None
+        self.background_image = None
+        self.load_assets()
+    
+    def load_assets(self):
+        """Load game assets (images) with fallback to shapes if not found"""
+        # Try to load player image
+        try:
+            player_img = pygame.image.load('player.png')
+            # Resize to approximately 50x50 pixels
+            self.player_image = pygame.transform.scale(player_img, (50, 50))
+            print("Successfully loaded player.png")
+        except (pygame.error, FileNotFoundError) as e:
+            print(f"Could not load player.png: {e}")
+            print("Falling back to white square for player")
+            self.player_image = None
+        
+        # Try to load background image
+        try:
+            bg_img = pygame.image.load('background.png')
+            # Scale to fit window size
+            self.background_image = pygame.transform.scale(bg_img, (SCREEN_WIDTH, SCREEN_HEIGHT))
+            print("Successfully loaded background.png")
+        except (pygame.error, FileNotFoundError) as e:
+            print(f"Could not load background.png: {e}")
+            print("Falling back to black background")
+            self.background_image = None
     
     def handle_events(self):
         """Handle all game events"""
@@ -85,8 +114,14 @@ class GameEngine:
                 self.player_y += PLAYER_SPEED
             
             # Keep player within screen bounds
-            self.player_x = max(PLAYER_SIZE // 2, min(SCREEN_WIDTH - PLAYER_SIZE // 2, self.player_x))
-            self.player_y = max(PLAYER_SIZE // 2, min(SCREEN_HEIGHT - PLAYER_SIZE // 2, self.player_y))
+            # Use appropriate size based on whether we have an image or not
+            if self.player_image:
+                player_half_size = 25  # 50x50 image, so half is 25
+            else:
+                player_half_size = PLAYER_SIZE // 2  # 20x20 square, so half is 10
+            
+            self.player_x = max(player_half_size, min(SCREEN_WIDTH - player_half_size, self.player_x))
+            self.player_y = max(player_half_size, min(SCREEN_HEIGHT - player_half_size, self.player_y))
     
     def draw_start_screen(self):
         """Draw the start screen"""
@@ -109,17 +144,28 @@ class GameEngine:
     
     def draw_game_screen(self):
         """Draw the game screen"""
-        # Clear screen with black background
-        self.screen.fill(BLACK)
+        # Draw background (image or black fill)
+        if self.background_image:
+            self.screen.blit(self.background_image, (0, 0))
+        else:
+            # Fallback to black background
+            self.screen.fill(BLACK)
         
-        # Draw player (white square)
-        player_rect = pygame.Rect(
-            self.player_x - PLAYER_SIZE // 2,
-            self.player_y - PLAYER_SIZE // 2,
-            PLAYER_SIZE,
-            PLAYER_SIZE
-        )
-        pygame.draw.rect(self.screen, WHITE, player_rect)
+        # Draw player (image or white square)
+        if self.player_image:
+            # Get the center position for the image
+            player_rect = self.player_image.get_rect()
+            player_rect.center = (self.player_x, self.player_y)
+            self.screen.blit(self.player_image, player_rect)
+        else:
+            # Fallback to white square
+            player_rect = pygame.Rect(
+                self.player_x - PLAYER_SIZE // 2,
+                self.player_y - PLAYER_SIZE // 2,
+                PLAYER_SIZE,
+                PLAYER_SIZE
+            )
+            pygame.draw.rect(self.screen, WHITE, player_rect)
         
         # Draw instructions
         instruction_text = self.small_font.render("Use Arrow Keys or WASD to move", True, GRAY)
