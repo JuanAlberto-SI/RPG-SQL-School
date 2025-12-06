@@ -4,6 +4,7 @@ Main game logic using pygame
 """
 import pygame
 import sys
+from db_connection import get_db_connection
 
 # Initialize Pygame
 pygame.init()
@@ -34,9 +35,13 @@ class GameEngine:
         self.running = True
         self.game_state = "start"  # 'start' or 'playing'
         
-        # Player position
+        # Player position (will be loaded from database)
         self.player_x = SCREEN_WIDTH // 2
         self.player_y = SCREEN_HEIGHT // 2
+        
+        # Database IDs for saving/loading
+        self.player_id = None
+        self.save_game_id = None
         
         # Font for text
         self.font = pygame.font.Font(None, 36)
@@ -46,6 +51,8 @@ class GameEngine:
         """Handle all game events"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                # Save game before quitting
+                self.save_game()
                 self.running = False
             
             elif event.type == pygame.KEYDOWN:
@@ -130,9 +137,125 @@ class GameEngine:
         
         pygame.display.flip()
     
+    def load_or_create_player(self):
+        """
+        Load player data from database or create a new player if it doesn't exist.
+        Sets player position from saved game data.
+        """
+        conn = get_db_connection()
+        if not conn:
+            print("Warning: Could not connect to database. Using default position.")
+            return
+        
+        try:
+            cursor = conn.cursor()
+            username = 'Player1'
+            
+            # Check if player exists
+            cursor.execute("SELECT PlayerID FROM Players WHERE Username = ?", (username,))
+            player_row = cursor.fetchone()
+            
+            if player_row:
+                # Player exists, get their PlayerID
+                self.player_id = player_row[0]
+                print(f"Player '{username}' found (ID: {self.player_id})")
+                
+                # Get the active save game for this player
+                cursor.execute("""
+                    SELECT SaveGameID, PositionX, PositionY 
+                    FROM SaveGames 
+                    WHERE PlayerID = ? AND IsActive = 1
+                """, (self.player_id,))
+                save_row = cursor.fetchone()
+                
+                if save_row:
+                    self.save_game_id = save_row[0]
+                    # Load position from database
+                    self.player_x = float(save_row[1])
+                    self.player_y = float(save_row[2])
+                    print(f"Loaded saved position: ({self.player_x}, {self.player_y})")
+                else:
+                    # Player exists but no save game, create one
+                    print("Player exists but no save game found. Creating new save game...")
+                    cursor.execute("""
+                        INSERT INTO SaveGames (PlayerID, Level, ExperiencePoints, CurrentHP, MaxHP, PositionX, PositionY, PositionZ)
+                        OUTPUT INSERTED.SaveGameID
+                        VALUES (?, 1, 0, 100, 100, 0.0, 0.0, 0.0)
+                    """, (self.player_id,))
+                    result = cursor.fetchone()
+                    self.save_game_id = result[0] if result else None
+                    conn.commit()
+                    self.player_x = 0.0
+                    self.player_y = 0.0
+                    print(f"Created new save game (ID: {self.save_game_id})")
+            else:
+                # Player doesn't exist, create new player and save game
+                print(f"Player '{username}' not found. Creating new player...")
+                cursor.execute("""
+                    INSERT INTO Players (Username, PasswordHash, Email, IsActive)
+                    OUTPUT INSERTED.PlayerID
+                    VALUES (?, ?, ?, 1)
+                """, (username, 'default_hash', None))
+                result = cursor.fetchone()
+                self.player_id = result[0] if result else None
+                conn.commit()
+                print(f"Created new player '{username}' (ID: {self.player_id})")
+                
+                # Create save game for new player
+                if self.player_id:
+                    cursor.execute("""
+                        INSERT INTO SaveGames (PlayerID, Level, ExperiencePoints, CurrentHP, MaxHP, PositionX, PositionY, PositionZ)
+                        OUTPUT INSERTED.SaveGameID
+                        VALUES (?, 1, 0, 100, 100, 0.0, 0.0, 0.0)
+                    """, (self.player_id,))
+                    result = cursor.fetchone()
+                    self.save_game_id = result[0] if result else None
+                    conn.commit()
+                    self.player_x = 0.0
+                    self.player_y = 0.0
+                    print(f"Created new save game (ID: {self.save_game_id})")
+            
+        except Exception as e:
+            print(f"Error loading/creating player: {e}")
+            print("Using default position.")
+        finally:
+            conn.close()
+    
+    def save_game(self):
+        """
+        Save current player position to the database.
+        """
+        if not self.save_game_id:
+            print("Warning: No save game ID available. Cannot save.")
+            return
+        
+        conn = get_db_connection()
+        if not conn:
+            print("Warning: Could not connect to database. Game state not saved.")
+            return
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE SaveGames 
+                SET PositionX = ?, PositionY = ?, LastSaved = GETDATE()
+                WHERE SaveGameID = ?
+            """, (float(self.player_x), float(self.player_y), self.save_game_id))
+            conn.commit()
+            print(f"Game saved: Position ({self.player_x}, {self.player_y})")
+        except Exception as e:
+            print(f"Error saving game: {e}")
+        finally:
+            conn.close()
+    
     def run(self):
         """Main game loop"""
         print("Game engine initialized")
+        
+        # Load or create player before starting game loop
+        print("Loading player data from database...")
+        self.load_or_create_player()
+        
         print("Starting game loop...")
         
         while self.running:

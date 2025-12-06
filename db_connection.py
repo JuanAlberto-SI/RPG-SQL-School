@@ -6,7 +6,7 @@ import pyodbc
 from typing import Optional
 
 
-def get_db_connection(server: str = "localhost\\SQLEXPRESS", 
+def get_db_connection(server: str = "MXUN103T20416P", 
                      database: str = "RetroRPG",
                      trusted_connection: bool = True) -> Optional[pyodbc.Connection]:
     """
