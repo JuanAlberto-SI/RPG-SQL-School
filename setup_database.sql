@@ -466,4 +466,16 @@ PRINT 'All tables created and seeded successfully!';
 PRINT 'Database is ready for use.';
 GO
 
+USE RetroRPG;
+
+-- Actualizamos los monstruos para que sean equilibrados
+UPDATE MonsterCatalog SET BaseHP = 30, BaseAttack = 5 WHERE MonsterName = 'Fire Slime';
+UPDATE MonsterCatalog SET BaseHP = 40, BaseAttack = 8 WHERE MonsterName = 'Water Sprite';
+UPDATE MonsterCatalog SET BaseHP = 60, BaseAttack = 15 WHERE MonsterName = 'Plant Guardian'; -- Este será un "Jefe" pequeño
+UPDATE MonsterCatalog SET BaseHP = 25, BaseAttack = 4 WHERE MonsterName = 'Goblin';
+
+-- Aseguramos que existan al menos estos 4
+IF NOT EXISTS (SELECT * FROM MonsterCatalog WHERE MonsterName = 'Goblin')
+INSERT INTO MonsterCatalog (MonsterName, ElementID, BaseHP, BaseAttack, BaseDefense, BaseSpeed)
+VALUES ('Goblin', 1, 25, 4, 0, 10);
 

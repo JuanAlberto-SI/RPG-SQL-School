@@ -1,48 +1,28 @@
-"""
-Database Connection Module
-Handles SQL Server database connections using pyodbc
-"""
 import pyodbc
 from typing import Optional
 
+def get_db_connection(server: str = r"DESKTOP-GKI5BE3\SQLEXPRESS", 
+                      database: str = "RetroRPG", 
+                      trusted_connection: bool = True) -> Optional[pyodbc.Connection]:
+    """
+    Establece conexión a SQL Server.
+    """
+    
+    # Cadena de conexión segura
+    connection_string = (
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={server};"
+        f"DATABASE={database};"
+        f"Trusted_Connection=yes;"
+    )
 
-def get_db_connection(server: str = "MXUN103T20416P", 
-                     database: str = "RetroRPG",
-                     trusted_connection: bool = True) -> Optional[pyodbc.Connection]:
-    """
-    Establishes a connection to SQL Server database.
-    
-    Args:
-        server: SQL Server instance name (default: localhost\\SQLEXPRESS)
-        database: Database name (default: RetroRPG)
-        trusted_connection: Use Windows Authentication (default: True)
-    
-    Returns:
-        pyodbc.Connection object if successful, None otherwise
-    """
     try:
-        # Build connection string
-        if trusted_connection:
-            connection_string = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                f"SERVER={server};"
-                f"DATABASE={database};"
-                f"Trusted_Connection=yes;"
-            )
-        else:
-            # For SQL Server authentication (if needed later)
-            connection_string = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                f"SERVER={server};"
-                f"DATABASE={database};"
-                f"UID=your_username;"
-                f"PWD=your_password;"
-            )
-        
-        # Attempt connection
         connection = pyodbc.connect(connection_string)
         print(f"Successfully connected to {database} on {server}")
         return connection
+    except pyodbc.Error as e:
+        print(f"Database connection error: {e}")
+        return None
     
     except pyodbc.Error as e:
         print(f"Database connection error: {e}")
