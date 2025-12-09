@@ -3,19 +3,19 @@ import pyodbc
 import random
 import sys
 import math
+import os
 from db_connection import get_db_connection
 
 # --- CONFIGURACIÓN ---
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
-HUD_HEIGHT = 80 # Altura de la barra negra superior
+GAME_WIDTH = 800
+GAME_HEIGHT = 600
 
 # Colores
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-RED = (231, 76, 60)      
-GREEN = (46, 204, 113)   
-BLUE = (52, 152, 219)    
+RED = (220, 20, 60)
+GREEN = (46, 204, 113)
+BLUE = (52, 152, 219)
 DARK_BLUE = (44, 62, 80) 
 GOLD = (241, 196, 15)    
 YELLOW = (255, 255, 0)
@@ -27,7 +27,7 @@ DARK_OVERLAY = (0, 0, 0, 150)
 
 FPS = 60
 
-# --- EFECTOS ---
+# --- CLASES VISUALES ---
 class FloatingText:
     def __init__(self, x, y, text, color, font):
         self.x, self.y = x, y
@@ -37,12 +37,12 @@ class FloatingText:
         self.font = font
     def update(self):
         self.y -= 1; self.timer -= 1
-    def draw(self, screen):
+    def draw(self, surface):
         if self.timer > 0:
             shadow = self.font.render(str(self.text), True, BLACK)
             text = self.font.render(str(self.text), True, self.color)
-            screen.blit(shadow, (self.x + 2, self.y + 2))
-            screen.blit(text, (self.x, self.y))
+            surface.blit(shadow, (self.x + 2, self.y + 2))
+            surface.blit(text, (self.x, self.y))
 
 class Particle:
     def __init__(self, x, y, color):
@@ -53,16 +53,19 @@ class Particle:
         self.vx, self.vy = random.uniform(-3, 3), random.uniform(-3, 3)
     def update(self):
         self.x += self.vx; self.y += self.vy; self.life -= 1; self.size -= 0.1
-    def draw(self, screen):
+    def draw(self, surface):
         if self.life > 0 and self.size > 0:
-            pygame.draw.rect(screen, self.color, (self.x, self.y, self.size, self.size))
+            pygame.draw.rect(surface, self.color, (self.x, self.y, self.size, self.size))
 
 # --- MOTOR PRINCIPAL ---
 class GameEngine:
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Retro RPG - PROYECTO FINAL")
+        pygame.mixer.init()
+        
+        self.screen = pygame.display.set_mode((GAME_WIDTH, GAME_HEIGHT), pygame.RESIZABLE)
+        self.canvas = pygame.Surface((GAME_WIDTH, GAME_HEIGHT))
+        pygame.display.set_caption("Retro RPG - FINAL VERSION")
         self.clock = pygame.time.Clock()
         
         # Fuentes
@@ -70,10 +73,12 @@ class GameEngine:
             self.font_s = pygame.font.Font("PressStart2P.ttf", 12)
             self.font_m = pygame.font.Font("PressStart2P.ttf", 20)
             self.font_l = pygame.font.Font("PressStart2P.ttf", 40)
+            self.font_xl = pygame.font.Font("PressStart2P.ttf", 60)
         except:
             self.font_s = pygame.font.Font(None, 24)
             self.font_m = pygame.font.Font(None, 36)
             self.font_l = pygame.font.Font(None, 74)
+            self.font_xl = pygame.font.Font(None, 100)
         
         self.running = True
         self.game_state = "title"
@@ -93,7 +98,6 @@ class GameEngine:
         self.target_kills = 5
         self.max_unlocked_level = 1
         
-        # Configuración Niveles
         self.levels_config = {
             1: {"name": "Bosque Inicio", "bg": "bg_forest.png", "obs": "tree.png", "enemy": "Goblin", "req": 3},
             2: {"name": "Espesura", "bg": "bg_forest.png", "obs": "tree.png", "enemy": "Goblin", "req": 4},
@@ -118,10 +122,11 @@ class GameEngine:
         self.obstacles = []
         self.monster_catalog = []
         self.images = {}
+        self.sounds = {}
         self.enemy_projectiles = []
         self.enemy_action_timer = 0
 
-        print("--- CONECTANDO ---")
+        print("--- CARGANDO ---")
         self.load_all_assets()
         self.load_player_from_db()
         self.load_monsters_from_db()
@@ -132,6 +137,12 @@ class GameEngine:
             return pygame.transform.scale(img, size)
         except: return None
 
+    def load_sound(self, name):
+        if os.path.exists(name):
+            try: return pygame.mixer.Sound(name)
+            except: return None
+        return None
+
     def load_all_assets(self):
         assets = {
             "bg_forest.png": (800,600), "bg_cave.png": (800,600), "bg_dungeon.png": (800,600),
@@ -140,6 +151,18 @@ class GameEngine:
             "goblin.png": (50,50), "shadow.png": (50,50), "ogre.png": (180,180), "brain.png": (45,45)
         }
         for name, size in assets.items(): self.images[name] = self.load_image(name, size)
+        
+        if os.path.exists("music.mp3"):
+            try:
+                pygame.mixer.music.load("music.mp3")
+                pygame.mixer.music.set_volume(0.4)
+                pygame.mixer.music.play(-1)
+                print("Música OK")
+            except: print("Error musica")
+        
+        self.sounds["hit"] = self.load_sound("hit.wav")
+        self.sounds["magic"] = self.load_sound("magic.wav")
+        self.sounds["drink"] = self.load_sound("drink.wav")
 
     def load_monsters_from_db(self):
         conn = get_db_connection()
@@ -183,8 +206,23 @@ class GameEngine:
                              FROM SaveGames s JOIN Players p ON s.PlayerID=p.PlayerID WHERE p.Username='Player1'""",
                           (self.player_stats["Level"], hp_save, self.player_stats["MaxHP"], self.player_stats["XP"], self.player_x, self.player_y, float(self.max_unlocked_level)))
                 conn.commit(); conn.close()
-                print("--> SQL SUCCESS")
-            except Exception as e: print(f"--> SQL ERROR: {e}")
+            except: pass
+
+    def reset_progress(self):
+        print("--- REINICIANDO PARTIDA ---")
+        conn = get_db_connection()
+        if conn:
+            try:
+                c = conn.cursor()
+                c.execute("""UPDATE SaveGames SET Level=1, CurrentHP=100, MaxHP=100, ExperiencePoints=0, PositionX=400, PositionY=300, PositionZ=1.0, LastSaved=GETDATE()
+                             FROM SaveGames s JOIN Players p ON s.PlayerID=p.PlayerID WHERE p.Username='Player1'""")
+                conn.commit(); conn.close()
+                self.player_stats = {"Username": "Hero", "Level": 1, "HP": 100, "MaxHP": 100, "Mana": 100, "MaxMana": 100, "XP": 0}
+                self.max_unlocked_level = 1
+                self.current_stage = 1
+                self.potions = 3
+                print("Reiniciado.")
+            except: pass
 
     def start_level(self, stage):
         if stage > 10: self.game_state = "victory"; self.save_game_to_db(); return
@@ -202,9 +240,7 @@ class GameEngine:
         obs_key = config["obs"]
         for _ in range(12):
             while True:
-                # Generación segura lejos del HUD
-                ox = random.randint(50, SCREEN_WIDTH - 100)
-                oy = random.randint(HUD_HEIGHT + 20, SCREEN_HEIGHT - 80)
+                ox, oy = random.randint(50, GAME_WIDTH-100), random.randint(100, GAME_HEIGHT-100)
                 rect = pygame.Rect(ox+10, oy+40, 30, 20)
                 if not rect.colliderect(pygame.Rect(350, 250, 150, 150)):
                     self.obstacles.append({"rect": rect, "pos": (ox, oy), "img": obs_key}); break
@@ -224,8 +260,7 @@ class GameEngine:
         self.enemy_data["Attack"] = int(self.enemy_data["Attack"] * mult * self.difficulty_mult)
 
         while True:
-            ex = random.randint(50, SCREEN_WIDTH - 100)
-            ey = random.randint(HUD_HEIGHT + 20, SCREEN_HEIGHT - 100) # Evitar HUD
+            ex, ey = random.randint(50, GAME_WIDTH-100), random.randint(100, GAME_HEIGHT-100)
             w, h = (150, 150) if name == "Ogre" else (50, 50)
             self.enemy_rect = pygame.Rect(ex, ey, w, h)
             if math.hypot(ex-self.player_x, ey-self.player_y) > 200: break
@@ -236,11 +271,11 @@ class GameEngine:
 
         for p in self.projectiles[:]:
             p["rect"].x += p["v"][0]; p["rect"].y += p["v"][1]
-            if not (0 < p["rect"].x < SCREEN_WIDTH and 0 < p["rect"].y < SCREEN_HEIGHT):
+            if not (0 < p["rect"].x < GAME_WIDTH and 0 < p["rect"].y < GAME_HEIGHT):
                 if p in self.projectiles: self.projectiles.remove(p)
                 continue
             if p["rect"].colliderect(self.enemy_rect):
-                self.damage_enemy(25 + self.player_stats["Level"]*2)
+                self.damage_enemy_ranged(25 + self.player_stats["Level"] * 2)
                 if p in self.projectiles: self.projectiles.remove(p)
                 break
 
@@ -273,8 +308,8 @@ class GameEngine:
             self.enemy_action_timer += 1
             if self.enemy_action_timer > 120 and dist < 150:
                 self.enemy_action_timer = 0
-                ex = max(50, min(self.player_x + random.choice([-80, 80]), SCREEN_WIDTH-50))
-                ey = max(HUD_HEIGHT + 20, min(self.player_y + random.choice([-80, 80]), SCREEN_HEIGHT-50))
+                ex = max(50, min(self.player_x + random.choice([-80, 80]), GAME_WIDTH-50))
+                ey = max(100, min(self.player_y + random.choice([-80, 80]), GAME_HEIGHT-50))
                 for _ in range(5): self.particles.append(Particle(ex, ey, BLACK))
         else: 
             if ename=="Ogre": speed=1.0
@@ -283,18 +318,15 @@ class GameEngine:
             if self.player_y > ey: ey += speed
             else: ey -= speed
 
-        # --- JAULA PERFECTA (ENEMIGOS) ---
-        ex = max(0, min(ex, SCREEN_WIDTH - self.enemy_rect.width))
-        # El enemigo no puede subir más allá del HUD (80px)
-        ey = max(HUD_HEIGHT, min(ey, SCREEN_HEIGHT - self.enemy_rect.height))
-        
+        ex = max(0, min(ex, GAME_WIDTH - self.enemy_rect.width))
+        ey = max(100, min(ey, GAME_HEIGHT - self.enemy_rect.height))
         self.enemy_rect.x, self.enemy_rect.y = ex, ey
 
         if self.player_rect.colliderect(self.enemy_rect): self.take_damage(self.enemy_data["Attack"])
 
         for p in self.enemy_projectiles[:]:
             p["rect"].x += p["v"][0]; p["rect"].y += p["v"][1]
-            if not (0 < p["rect"].x < SCREEN_WIDTH and 0 < p["rect"].y < SCREEN_HEIGHT):
+            if not (0 < p["rect"].x < GAME_WIDTH and 0 < p["rect"].y < GAME_HEIGHT):
                 if p in self.enemy_projectiles: self.enemy_projectiles.remove(p)
                 continue
             if p["rect"].colliderect(self.player_rect):
@@ -319,20 +351,66 @@ class GameEngine:
     def damage_enemy(self, dmg):
         self.enemy_data["HP"] -= dmg
         self.floating_texts.append(FloatingText(self.enemy_rect.centerx, self.enemy_rect.y, str(dmg), WHITE, self.font_m))
+        if "hit" in self.sounds and self.sounds["hit"]: self.sounds["hit"].play()
+        
         if self.enemy_data["HP"] <= 0:
             xp = 20 * self.current_stage; self.player_stats["XP"] += xp
             self.floating_texts.append(FloatingText(self.player_x, self.player_y, f"+{xp} XP", GOLD, self.font_m))
-            
             if self.player_stats["XP"] >= self.player_stats["Level"]*100:
                 self.player_stats["Level"] += 1; self.player_stats["XP"] = 0
                 self.player_stats["MaxHP"] += 20; self.player_stats["HP"] = self.player_stats["MaxHP"]
                 self.floating_texts.append(FloatingText(self.player_x, self.player_y-40, "LEVEL UP!", GREEN, self.font_l))
                 self.save_game_to_db()
-            
             for _ in range(8): self.particles.append(Particle(self.enemy_rect.centerx, self.enemy_rect.centery, RED))
             self.kills_in_stage += 1
             if self.kills_in_stage >= self.target_kills: self.start_level(self.current_stage + 1)
             else: self.spawn_enemy()
+
+    def damage_enemy_ranged(self, dmg):
+        self.enemy_data["HP"] -= dmg
+        self.floating_texts.append(FloatingText(self.enemy_rect.centerx, self.enemy_rect.y, str(dmg), WHITE, self.font_m))
+        if self.enemy_data["HP"] <= 0: self.handle_kill()
+
+    def handle_kill(self):
+        xp = 20 * self.current_stage
+        self.player_stats["XP"] += xp
+        self.floating_texts.append(FloatingText(self.player_x, self.player_y, f"+{xp} XP", GOLD, self.font_m))
+        
+        if self.player_stats["XP"] >= self.player_stats["Level"] * 100:
+            self.player_stats["Level"] += 1
+            self.player_stats["XP"] = 0
+            self.player_stats["MaxHP"] += 20
+            self.player_stats["HP"] = self.player_stats["MaxHP"]
+            self.floating_texts.append(FloatingText(self.player_x, self.player_y-40, "LEVEL UP!", GREEN, self.font_l))
+            self.save_game_to_db()
+        for _ in range(8): self.particles.append(Particle(self.enemy_rect.centerx, self.enemy_rect.centery, RED))
+        self.kills_in_stage += 1
+        if self.kills_in_stage >= self.target_kills: self.start_level(self.current_stage + 1)
+        else: self.spawn_enemy()
+
+    def attack_melee(self):
+        self.slash_timer = 15
+        atk_rect = self.player_rect.inflate(70, 70)
+        if atk_rect.colliderect(self.enemy_rect):
+            dmg = 20 + (self.player_stats["Level"] * 4)
+            self.damage_enemy(dmg)
+
+    def shoot(self):
+        if self.player_stats["Mana"] >= 10:
+            self.player_stats["Mana"] -= 10
+            vx, vy = self.last_dir
+            self.projectiles.append({"rect": pygame.Rect(self.player_x+20, self.player_y+20, 20, 20), "v": (vx*12, vy*12)})
+            if "magic" in self.sounds: self.sounds["magic"].play()
+        else:
+            self.floating_texts.append(FloatingText(self.player_x, self.player_y-30, "NO MANA", BLUE, self.font_s))
+
+    def use_potion(self):
+        if self.potions > 0 and self.player_stats["HP"] < self.player_stats["MaxHP"]:
+            self.potions -= 1
+            heal = int(self.player_stats["MaxHP"] * 0.5)
+            self.player_stats["HP"] = min(self.player_stats["MaxHP"], self.player_stats["HP"] + heal)
+            self.floating_texts.append(FloatingText(self.player_x, self.player_y, f"+{heal}", GREEN, self.font_m))
+            if "drink" in self.sounds: self.sounds["drink"].play()
 
     def handle_input(self):
         keys = pygame.key.get_pressed()
@@ -343,63 +421,68 @@ class GameEngine:
         if keys[pygame.K_DOWN] or keys[pygame.K_s]: dy = 1
         if dx!=0 or dy!=0: self.last_dir = (dx, dy)
         
-        # --- JAULA PERFECTA (JUGADOR) ---
-        # El jugador no puede subir más allá de Y=80 (HUD_HEIGHT)
-        self.player_x = max(0, min(self.player_x + dx*self.player_speed, SCREEN_WIDTH-40))
-        self.player_y = max(HUD_HEIGHT, min(self.player_y + dy*self.player_speed, SCREEN_HEIGHT-40))
-        
+        self.player_x = max(0, min(self.player_x + dx*self.player_speed, GAME_WIDTH-40))
+        self.player_y = max(100, min(self.player_y + dy*self.player_speed, GAME_HEIGHT-40))
         self.player_rect.topleft = (self.player_x, self.player_y)
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT: self.save_game_to_db(); self.running = False
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE: self.game_state = "paused"
-                if event.key == pygame.K_SPACE: 
-                    self.slash_timer = 15; atk = self.player_rect.inflate(70,70)
-                    if atk.colliderect(self.enemy_rect): self.damage_enemy(20 + self.player_stats["Level"]*4)
-                if event.key == pygame.K_z: 
-                    if self.player_stats["Mana"]>=10:
-                        self.player_stats["Mana"]-=10; vx,vy = self.last_dir
-                        self.projectiles.append({"rect": pygame.Rect(self.player_x+20, self.player_y+20, 20, 20), "v": (vx*12, vy*12)})
-                    else: self.floating_texts.append(FloatingText(self.player_x, self.player_y-30, "NO MANA", BLUE, self.font_s))
-                if event.key == pygame.K_h:
-                    if self.potions > 0: self.potions-=1; self.player_stats["HP"]=min(self.player_stats["MaxHP"], self.player_stats["HP"]+50)
+                if event.key == pygame.K_SPACE: self.attack_melee()
+                if event.key == pygame.K_z: self.shoot()
+                if event.key == pygame.K_h: self.use_potion()
 
     # --- DIBUJO ---
+    def get_game_pos(self, mouse_pos):
+        win_w, win_h = self.screen.get_size()
+        scale_x = win_w / GAME_WIDTH
+        scale_y = win_h / GAME_HEIGHT
+        scale = min(scale_x, scale_y)
+        new_w = int(GAME_WIDTH * scale); new_h = int(GAME_HEIGHT * scale)
+        offset_x = (win_w - new_w) // 2; offset_y = (win_h - new_h) // 2
+        mx = (mouse_pos[0] - offset_x) / scale
+        my = (mouse_pos[1] - offset_y) / scale
+        return (mx, my)
+
     def draw_panel(self, x, y, w, h):
-        pygame.draw.rect(self.screen, DARK_BLUE, (x, y, w, h))
-        pygame.draw.rect(self.screen, SILVER, (x, y, w, h), 3)
+        pygame.draw.rect(self.canvas, DARK_BLUE, (x, y, w, h))
+        pygame.draw.rect(self.canvas, SILVER, (x, y, w, h), 3)
 
     def draw_bar_pro(self, x, y, current, max_val, color, label):
         bar_w, bar_h = 200, 20
-        pygame.draw.rect(self.screen, BLACK, (x, y, bar_w, bar_h))
+        pygame.draw.rect(self.canvas, BLACK, (x, y, bar_w, bar_h))
         pct = max(0, min(current / max_val, 1))
-        pygame.draw.rect(self.screen, color, (x, y, bar_w * pct, bar_h))
-        pygame.draw.rect(self.screen, WHITE, (x, y, bar_w, bar_h), 2)
+        pygame.draw.rect(self.canvas, color, (x, y, bar_w * pct, bar_h))
+        pygame.draw.rect(self.canvas, WHITE, (x, y, bar_w, bar_h), 2)
         lbl = self.font_s.render(f"{label}: {int(current)}/{max_val}", True, WHITE)
-        self.screen.blit(lbl, (x + 5, y + 2))
+        self.canvas.blit(lbl, (x + 5, y + 2))
 
     def draw_ui(self):
-        if self.images["bg_forest.png"]: self.screen.blit(self.images["bg_forest.png"], (0,0))
-        s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA); s.fill(DARK_OVERLAY); self.screen.blit(s,(0,0))
-        m = pygame.mouse.get_pos(); click = pygame.mouse.get_pressed()[0]
+        if self.images["bg_forest.png"]: self.canvas.blit(self.images["bg_forest.png"], (0,0))
+        s = pygame.Surface((GAME_WIDTH, GAME_HEIGHT), pygame.SRCALPHA); s.fill(DARK_OVERLAY); self.canvas.blit(s,(0,0))
+        
+        real_mouse = pygame.mouse.get_pos()
+        m = self.get_game_pos(real_mouse)
+        click = pygame.mouse.get_pressed()[0]
 
         if self.game_state == "title":
             t = self.font_l.render("RETRO RPG", True, GOLD)
             shadow = self.font_l.render("RETRO RPG", True, BLACK)
-            self.screen.blit(shadow, (SCREEN_WIDTH//2-t.get_width()//2+4, 104))
-            self.screen.blit(t, (SCREEN_WIDTH//2-t.get_width()//2, 100))
+            self.canvas.blit(shadow, (GAME_WIDTH//2-t.get_width()//2+4, 104))
+            self.canvas.blit(t, (GAME_WIDTH//2-t.get_width()//2, 100))
             
-            bx, by, bw, bh = 300, 300, 200, 60
+            bx, by, bw, bh = 300, 280, 200, 60
             self.draw_panel(bx, by, bw, bh)
             btn_txt = self.font_m.render("JUGAR", True, WHITE)
             if pygame.Rect(bx, by, bw, bh).collidepoint(m): 
-                pygame.draw.rect(self.screen, WHITE, (bx, by, bw, bh), 3)
+                pygame.draw.rect(self.canvas, WHITE, (bx, by, bw, bh), 3)
                 if click: self.game_state = "level_select"; pygame.time.delay(200)
-            self.screen.blit(btn_txt, (bx + (bw-btn_txt.get_width())//2, by + 20))
+            self.canvas.blit(btn_txt, (bx + (bw-btn_txt.get_width())//2, by + 20))
 
         elif self.game_state == "level_select":
-            self.screen.blit(self.font_l.render("MAPAS", True, WHITE), (300, 30))
+            t = self.font_l.render("MAPAS", True, WHITE)
+            self.canvas.blit(t, (GAME_WIDTH//2 - t.get_width()//2, 30))
             for i in range(1, 11):
                 col = 0 if i <= 5 else 1; row = (i-1) % 5
                 x, y = 100 + col * 350, 100 + row * 80
@@ -409,18 +492,29 @@ class GameEngine:
                 self.draw_panel(x, y, 300, 60)
                 color_txt = GREEN if unlk else RED
                 txt = self.font_s.render(nm if unlk else "BLOQUEADO", True, color_txt)
-                self.screen.blit(txt, (x + 20, y + 25))
+                self.canvas.blit(txt, (x + 20, y + 25))
                 if unlk and pygame.Rect(x,y,300,60).collidepoint(m) and click:
                     self.start_level(i); pygame.time.delay(200)
 
+            rx, ry, rw, rh = 300, 520, 200, 60
+            self.draw_panel(rx, ry, rw, rh)
+            pygame.draw.rect(self.canvas, RED, (rx, ry, rw, rh), 1)
+            rtxt = self.font_m.render("REINICIAR", True, RED)
+            if pygame.Rect(rx, ry, rw, rh).collidepoint(m):
+                pygame.draw.rect(self.canvas, RED, (rx, ry, rw, rh), 3)
+                if click: self.reset_progress(); pygame.time.delay(500)
+            self.canvas.blit(rtxt, (rx + (rw-rtxt.get_width())//2, ry + 20))
+
         elif self.game_state == "paused":
             self.draw_panel(200, 200, 400, 200)
-            self.screen.blit(self.font_l.render("PAUSA", True, WHITE), (300, 220))
-            self.screen.blit(self.font_s.render("ESC: Volver | Q: Menu", True, YELLOW), (250, 300))
+            t = self.font_l.render("PAUSA", True, WHITE)
+            self.canvas.blit(t, (GAME_WIDTH//2 - t.get_width()//2, 220))
+            msg = self.font_s.render("ESC: Volver | Q: Menu", True, YELLOW)
+            self.canvas.blit(msg, (GAME_WIDTH//2 - msg.get_width()//2, 300))
 
     def draw_game(self):
         conf = self.levels_config[self.current_stage]
-        if self.images[conf["bg"]]: self.screen.blit(self.images[conf["bg"]], (0,0))
+        if self.images[conf["bg"]]: self.canvas.blit(self.images[conf["bg"]], (0,0))
         
         draw_list = []
         for o in self.obstacles: draw_list.append({"y": o["pos"][1]+50, "type": "obs", "obj": o})
@@ -431,14 +525,14 @@ class GameEngine:
         for item in draw_list:
             if item["type"] == "obs":
                 o = item["obj"]
-                if self.images[o["img"]]: self.screen.blit(self.images[o["img"]], o["pos"])
+                if self.images[o["img"]]: self.canvas.blit(self.images[o["img"]], o["pos"])
             elif item["type"] == "player":
                 img = self.images["player.png"] 
                 if not self.facing_right: img = pygame.transform.flip(img, True, False)
-                self.screen.blit(img, (self.player_x, self.player_y))
+                self.canvas.blit(img, (self.player_x, self.player_y))
                 if self.slash_timer > 0:
                     sl = self.images["slash.png"] 
-                    if sl: self.screen.blit(sl, (self.player_x-15, self.player_y-15))
+                    if sl: self.canvas.blit(sl, (self.player_x-15, self.player_y-15))
             elif item["type"] == "enemy":
                 img_name = conf["enemy"]
                 filename = ""
@@ -448,68 +542,101 @@ class GameEngine:
                 elif img_name == "Ogre": filename = "ogre.png"
                 
                 img = self.images.get(filename) 
-                if img: self.screen.blit(img, self.enemy_rect.topleft)
-                else: pygame.draw.rect(self.screen, RED, self.enemy_rect)
+                if img: self.canvas.blit(img, self.enemy_rect.topleft)
+                else: pygame.draw.rect(self.canvas, RED, self.enemy_rect)
                 pct = max(0, self.enemy_data["HP"] / self.enemy_data["MaxHP"])
-                pygame.draw.rect(self.screen, RED, (self.enemy_rect.x, self.enemy_rect.y-10, 50*pct, 5))
+                pygame.draw.rect(self.canvas, RED, (self.enemy_rect.x, self.enemy_rect.y-10, 50*pct, 5))
 
         for p in self.projectiles:
-            if self.images["fireball.png"]: self.screen.blit(self.images["fireball.png"], p["rect"]) 
-            else: pygame.draw.circle(self.screen, ORANGE, p["rect"].center, 6)
+            if self.images["fireball.png"]: self.canvas.blit(self.images["fireball.png"], p["rect"]) 
+            else: pygame.draw.circle(self.canvas, ORANGE, p["rect"].center, 6)
         for ep in self.enemy_projectiles:
-            pygame.draw.circle(self.screen, PURPLE, ep["rect"].center, 8) 
+            pygame.draw.circle(self.canvas, PURPLE, ep["rect"].center, 8) 
             
-        for t in self.floating_texts: t.draw(self.screen)
-        for p in self.particles: p.draw(self.screen)
+        for t in self.floating_texts: t.draw(self.canvas)
+        for p in self.particles: p.draw(self.canvas)
 
-        self.draw_panel(0, 0, SCREEN_WIDTH, 80)
+        self.draw_panel(0, 0, GAME_WIDTH, 80)
         info = f"{self.player_stats['Username']} | LVL {self.player_stats['Level']}"
-        self.screen.blit(self.font_m.render(info, True, GOLD), (20, 15))
+        self.canvas.blit(self.font_m.render(info, True, GOLD), (20, 15))
         self.draw_bar_pro(20, 45, self.player_stats["HP"], self.player_stats["MaxHP"], RED, "HP")
         self.draw_bar_pro(240, 45, self.player_stats["Mana"], 100, BLUE, "MP")
-        self.screen.blit(self.font_s.render(f"Pociones: {self.potions} [H]", True, GREEN), (460, 20))
+        self.canvas.blit(self.font_s.render(f"Pociones: {self.potions} [H]", True, GREEN), (460, 20))
         goal = f"Meta: {self.target_kills - self.kills_in_stage}"
         if self.current_stage==10: goal = "BOSS FINAL"
-        self.screen.blit(self.font_m.render(goal, True, RED), (460, 50))
+        self.canvas.blit(self.font_m.render(goal, True, RED), (460, 50))
 
         if self.saving_icon_timer > 0:
             self.saving_icon_timer -= 1
-            pygame.draw.circle(self.screen, YELLOW, (SCREEN_WIDTH-30, SCREEN_HEIGHT-30), 8)
+            pygame.draw.circle(self.canvas, YELLOW, (GAME_WIDTH-30, GAME_HEIGHT-30), 8)
+
+    def draw_victory_screen(self):
+        s = pygame.Surface((GAME_WIDTH, GAME_HEIGHT), pygame.SRCALPHA); s.fill(DARK_OVERLAY)
+        self.canvas.blit(s, (0,0))
+        
+        t = self.font_xl.render("¡VICTORIA!", True, GOLD)
+        t_rect = t.get_rect(center=(GAME_WIDTH//2, GAME_HEIGHT//3))
+        self.canvas.blit(t, t_rect)
+        
+        sub = self.font_m.render("Has salvado el reino.", True, WHITE)
+        sub_rect = sub.get_rect(center=(GAME_WIDTH//2, GAME_HEIGHT//2))
+        self.canvas.blit(sub, sub_rect)
+
+        bx, by, bw, bh = GAME_WIDTH//2 - 100, GAME_HEIGHT//2 + 100, 200, 60
+        self.draw_panel(bx, by, bw, bh)
+        
+        real_mouse = pygame.mouse.get_pos()
+        m = self.get_game_pos(real_mouse)
+        click = pygame.mouse.get_pressed()[0]
+        
+        if pygame.Rect(bx, by, bw, bh).collidepoint(m):
+            pygame.draw.rect(self.canvas, WHITE, (bx, by, bw, bh), 3)
+            if click: self.game_state = "title"; pygame.time.delay(200)
+            
+        btn_txt = self.font_m.render("MENU", True, WHITE)
+        self.canvas.blit(btn_txt, (bx + (bw-btn_txt.get_width())//2, by + 20))
+
+    def draw_window(self):
+        win_w, win_h = self.screen.get_size()
+        scale_x = win_w / GAME_WIDTH
+        scale_y = win_h / GAME_HEIGHT
+        scale = min(scale_x, scale_y)
+        new_w = int(GAME_WIDTH * scale); new_h = int(GAME_HEIGHT * scale)
+        offset_x = (win_w - new_w) // 2; offset_y = (win_h - new_h) // 2
+        scaled_surf = pygame.transform.scale(self.canvas, (new_w, new_h))
+        self.screen.fill(BLACK) 
+        self.screen.blit(scaled_surf, (offset_x, offset_y))
+        pygame.display.flip()
 
     def run(self):
         while self.running:
-            if self.game_state == "playing": self.handle_input(); self.update(); self.draw_game()
-            elif self.game_state == "title": 
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT: self.running = False
-                self.draw_ui()
-            elif self.game_state == "level_select":
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT: self.running = False
-                self.draw_ui()
-            elif self.game_state == "paused":
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT: self.running = False
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT: self.save_game_to_db(); self.running = False
+                
+                if self.game_state == "playing":
                     if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE: self.game_state = "paused"
+                        if event.key == pygame.K_SPACE: self.attack_melee()
+                        if event.key == pygame.K_z: self.shoot()
+                        if event.key == pygame.K_h: self.use_potion()
+                    elif self.game_state == "paused":
                         if event.key == pygame.K_ESCAPE: self.game_state = "playing"
                         if event.key == pygame.K_q: self.save_game_to_db(); self.game_state = "title"
-                self.draw_ui()
-            elif self.game_state == "game_over":
-                self.screen.fill(BLACK)
-                t = self.font_l.render("GAME OVER", True, RED)
-                s = self.font_m.render("Presiona R para Menu", True, WHITE)
-                self.screen.blit(t, (SCREEN_WIDTH//2-t.get_width()//2, 250))
-                self.screen.blit(s, (SCREEN_WIDTH//2-s.get_width()//2, 350))
-                for e in pygame.event.get(): 
-                    if e.type == pygame.KEYDOWN and e.key == pygame.K_r: self.game_state = "title"
-            elif self.game_state == "victory":
-                self.screen.fill(WHITE)
-                t = self.font_l.render("VICTORIA!", True, GOLD)
-                self.screen.blit(t, (SCREEN_WIDTH//2-t.get_width()//2, 250))
-                for e in pygame.event.get(): 
-                    if e.type == pygame.KEYDOWN and e.key == pygame.K_r: self.game_state = "title"
 
-            pygame.display.flip()
+            if self.game_state == "playing": self.handle_input(); self.update(); self.draw_game()
+            elif self.game_state == "title": self.draw_ui()
+            elif self.game_state == "level_select": self.draw_ui()
+            elif self.game_state == "paused": self.draw_ui()
+            elif self.game_state == "game_over":
+                self.canvas.fill(BLACK)
+                t = self.font_l.render("GAME OVER", True, RED)
+                self.canvas.blit(t, (GAME_WIDTH//2-t.get_width()//2, 250))
+                self.draw_victory_screen() 
+            elif self.game_state == "victory":
+                self.draw_game()
+                self.draw_victory_screen()
+
+            self.draw_window()
             self.clock.tick(FPS)
         pygame.quit(); sys.exit()
 
