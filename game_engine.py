@@ -152,10 +152,11 @@ class GameEngine:
         }
         for name, size in assets.items(): self.images[name] = self.load_image(name, size)
         
+        # Audio Seguro
         if os.path.exists("music.mp3"):
             try:
                 pygame.mixer.music.load("music.mp3")
-                pygame.mixer.music.set_volume(0.4)
+                pygame.mixer.music.set_volume(1.0) # Volumen MAXIMO
                 pygame.mixer.music.play(-1)
                 print("Música OK")
             except: print("Error musica")
@@ -366,21 +367,28 @@ class GameEngine:
             if self.kills_in_stage >= self.target_kills: self.start_level(self.current_stage + 1)
             else: self.spawn_enemy()
 
+    # --- DISPARO & MELEE (RESTITUIDOS) ---
+    def shoot(self):
+        if self.player_stats["Mana"] >= 10:
+            self.player_stats["Mana"] -= 10
+            vx, vy = self.last_dir
+            self.projectiles.append({"rect": pygame.Rect(self.player_x+20, self.player_y+20, 20, 20), "v": (vx*12, vy*12)})
+            if "magic" in self.sounds and self.sounds["magic"]: self.sounds["magic"].play()
+        else:
+            self.floating_texts.append(FloatingText(self.player_x, self.player_y-30, "NO MANA", BLUE, self.font_s))
+
     def damage_enemy_ranged(self, dmg):
         self.enemy_data["HP"] -= dmg
         self.floating_texts.append(FloatingText(self.enemy_rect.centerx, self.enemy_rect.y, str(dmg), WHITE, self.font_m))
         if self.enemy_data["HP"] <= 0: self.handle_kill()
 
     def handle_kill(self):
-        xp = 20 * self.current_stage
-        self.player_stats["XP"] += xp
+        # Misma logica que damage_enemy
+        xp = 20 * self.current_stage; self.player_stats["XP"] += xp
         self.floating_texts.append(FloatingText(self.player_x, self.player_y, f"+{xp} XP", GOLD, self.font_m))
-        
-        if self.player_stats["XP"] >= self.player_stats["Level"] * 100:
-            self.player_stats["Level"] += 1
-            self.player_stats["XP"] = 0
-            self.player_stats["MaxHP"] += 20
-            self.player_stats["HP"] = self.player_stats["MaxHP"]
+        if self.player_stats["XP"] >= self.player_stats["Level"]*100:
+            self.player_stats["Level"] += 1; self.player_stats["XP"] = 0
+            self.player_stats["MaxHP"] += 20; self.player_stats["HP"] = self.player_stats["MaxHP"]
             self.floating_texts.append(FloatingText(self.player_x, self.player_y-40, "LEVEL UP!", GREEN, self.font_l))
             self.save_game_to_db()
         for _ in range(8): self.particles.append(Particle(self.enemy_rect.centerx, self.enemy_rect.centery, RED))
@@ -395,22 +403,13 @@ class GameEngine:
             dmg = 20 + (self.player_stats["Level"] * 4)
             self.damage_enemy(dmg)
 
-    def shoot(self):
-        if self.player_stats["Mana"] >= 10:
-            self.player_stats["Mana"] -= 10
-            vx, vy = self.last_dir
-            self.projectiles.append({"rect": pygame.Rect(self.player_x+20, self.player_y+20, 20, 20), "v": (vx*12, vy*12)})
-            if "magic" in self.sounds: self.sounds["magic"].play()
-        else:
-            self.floating_texts.append(FloatingText(self.player_x, self.player_y-30, "NO MANA", BLUE, self.font_s))
-
     def use_potion(self):
         if self.potions > 0 and self.player_stats["HP"] < self.player_stats["MaxHP"]:
             self.potions -= 1
             heal = int(self.player_stats["MaxHP"] * 0.5)
             self.player_stats["HP"] = min(self.player_stats["MaxHP"], self.player_stats["HP"] + heal)
             self.floating_texts.append(FloatingText(self.player_x, self.player_y, f"+{heal}", GREEN, self.font_m))
-            if "drink" in self.sounds: self.sounds["drink"].play()
+            if "drink" in self.sounds and self.sounds["drink"]: self.sounds["drink"].play()
 
     def handle_input(self):
         keys = pygame.key.get_pressed()
@@ -496,14 +495,16 @@ class GameEngine:
                 if unlk and pygame.Rect(x,y,300,60).collidepoint(m) and click:
                     self.start_level(i); pygame.time.delay(200)
 
+            # Botón RESET
             rx, ry, rw, rh = 300, 520, 200, 60
             self.draw_panel(rx, ry, rw, rh)
             pygame.draw.rect(self.canvas, RED, (rx, ry, rw, rh), 1)
-            rtxt = self.font_m.render("REINICIAR", True, RED)
+            rtxt = self.font_m.render("RESET", True, RED)
             if pygame.Rect(rx, ry, rw, rh).collidepoint(m):
                 pygame.draw.rect(self.canvas, RED, (rx, ry, rw, rh), 3)
                 if click: self.reset_progress(); pygame.time.delay(500)
             self.canvas.blit(rtxt, (rx + (rw-rtxt.get_width())//2, ry + 20))
+
 
         elif self.game_state == "paused":
             self.draw_panel(200, 200, 400, 200)
@@ -612,9 +613,8 @@ class GameEngine:
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT: self.save_game_to_db(); self.running = False
-                
-                if self.game_state == "playing":
-                    if event.type == pygame.KEYDOWN:
+                if event.type == pygame.KEYDOWN:
+                    if self.game_state == "playing":
                         if event.key == pygame.K_ESCAPE: self.game_state = "paused"
                         if event.key == pygame.K_SPACE: self.attack_melee()
                         if event.key == pygame.K_z: self.shoot()

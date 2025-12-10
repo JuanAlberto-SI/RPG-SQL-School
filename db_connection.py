@@ -1,14 +1,15 @@
 import pyodbc
 from typing import Optional
 
-def get_db_connection(server: str = r"DESKTOP-GKI5BE3\SQLEXPRESS", 
+def get_db_connection(server: str = r".\SQLEXPRESS", 
                       database: str = "RetroRPG", 
                       trusted_connection: bool = True) -> Optional[pyodbc.Connection]:
     """
     Establece conexión a SQL Server.
+    Intenta conectar a la instancia local y tiene un fallback a localhost.
     """
     
-    # Cadena de conexión segura
+    # 1. INTENTO PRINCIPAL: Conectar a .\SQLEXPRESS (Estándar en casas)
     connection_string = (
         f"DRIVER={{ODBC Driver 17 for SQL Server}};"
         f"SERVER={server};"
@@ -18,32 +19,37 @@ def get_db_connection(server: str = r"DESKTOP-GKI5BE3\SQLEXPRESS",
 
     try:
         connection = pyodbc.connect(connection_string)
-        print(f"Successfully connected to {database} on {server}")
+        # print(f"Conectado exitosamente a {server}") # Comentado para no llenar consola
         return connection
-    except pyodbc.Error as e:
-        print(f"Database connection error: {e}")
-        return None
-    
-    except pyodbc.Error as e:
-        print(f"Database connection error: {e}")
-        print("\nTroubleshooting tips:")
-        print("1. Ensure SQL Server Express is running")
-        print("2. Verify the server name (try 'localhost' or '.\\SQLEXPRESS')")
-        print("3. Check if ODBC Driver 17 for SQL Server is installed")
-        print("4. Verify the database 'RetroRPG' exists")
-        return None
-    
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        return None
-
+        
+    except pyodbc.Error:
+        # 2. PLAN B (FALLBACK): Intentar conectar a 'localhost' (Estándar en laboratorios)
+        print(f"Aviso: Falló conexión a {server}. Intentando con 'localhost'...")
+        
+        fallback_string = (
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER=localhost;" 
+            f"DATABASE={database};"
+            f"Trusted_Connection=yes;"
+        )
+        
+        try:
+            connection = pyodbc.connect(fallback_string)
+            print("--> Conectado a 'localhost' (Plan B exitoso)")
+            return connection
+        except pyodbc.Error as e:
+            # 3. SI TODO FALLA
+            print("\nError Fatal de Conexión:")
+            print(f"No se pudo conectar ni a '{server}' ni a 'localhost'.")
+            print(f"Detalle del error: {e}")
+            print("\nTips para solucionar:")
+            print("1. Asegurate que SQL Server este corriendo.")
+            print("2. Ejecuta el script setup_database.sql en la maquina.")
+            return None
 
 def test_connection() -> bool:
     """
-    Test function to verify database connection.
-    
-    Returns:
-        True if connection successful, False otherwise
+    Función de prueba para verificar la conexión.
     """
     conn = get_db_connection()
     if conn:
@@ -51,17 +57,17 @@ def test_connection() -> bool:
             cursor = conn.cursor()
             cursor.execute("SELECT @@VERSION")
             version = cursor.fetchone()
-            print(f"SQL Server version: {version[0]}")
+            print(f"Versión de SQL Server detectada: {version[0][:50]}...")
             conn.close()
             return True
         except Exception as e:
-            print(f"Error testing connection: {e}")
+            print(f"Error probando conexión: {e}")
             return False
     return False
 
-
 if __name__ == "__main__":
-    # Test the connection when run directly
-    print("Testing database connection...")
-    test_connection()
-
+    print("Probando conexión a base de datos...")
+    if test_connection():
+        print("¡TODO LISTO! La conexión funciona.")
+    else:
+        print("FALLÓ la conexión.")

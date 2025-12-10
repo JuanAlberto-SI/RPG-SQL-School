@@ -1,107 +1,97 @@
 -- =====================================================
--- Retro RPG - SCRIPT FINAL (PROYECTO COMPLETO)
+-- Retro RPG - SCRIPT DE REINICIO TOTAL (SOLUCION FINAL)
 -- =====================================================
 USE master;
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'RetroRPG')
+-- 1. SI EXISTE LA BASE DE DATOS, LA BORRAMOS (KICKEO A TODOS)
+IF EXISTS (SELECT * FROM sys.databases WHERE name = 'RetroRPG')
 BEGIN
-    CREATE DATABASE RetroRPG;
+    -- Esto cierra todas las conexiones abiertas para poder borrarla
+    ALTER DATABASE RetroRPG SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE RetroRPG;
+    PRINT 'Base de datos vieja eliminada.';
 END
+GO
+
+-- 2. CREAMOS LA NUEVA LIMPIA
+CREATE DATABASE RetroRPG;
 GO
 
 USE RetroRPG;
 GO
 
--- 1. TABLAS PRINCIPALES
--- ---------------------
-IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Elements]') AND type in (N'U'))
-BEGIN
-    CREATE TABLE [dbo].[Elements] (
-        [ElementID] INT IDENTITY(1,1) PRIMARY KEY,
-        [ElementName] VARCHAR(50) NOT NULL UNIQUE,
-        [Description] VARCHAR(255) NULL
-    );
-END
+-- =====================================================
+-- CREACIÓN DE TABLAS (ESTRUCTURA NUEVA Y LIMPIA)
+-- =====================================================
+
+-- TABLA ELEMENTOS
+CREATE TABLE [dbo].[Elements] (
+    [ElementID] INT IDENTITY(1,1) PRIMARY KEY,
+    [ElementName] VARCHAR(50) NOT NULL UNIQUE,
+    [Description] VARCHAR(255) NULL
+);
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Players]') AND type in (N'U'))
-BEGIN
-    CREATE TABLE [dbo].[Players] (
-        [PlayerID] INT IDENTITY(1,1) PRIMARY KEY,
-        [Username] VARCHAR(50) NOT NULL UNIQUE,
-        [PasswordHash] VARCHAR(255) NOT NULL,
-        [Email] VARCHAR(100) NULL,
-        [CreatedDate] DATETIME2 DEFAULT GETDATE()
-    );
-END
+-- TABLA JUGADORES
+CREATE TABLE [dbo].[Players] (
+    [PlayerID] INT IDENTITY(1,1) PRIMARY KEY,
+    [Username] VARCHAR(50) NOT NULL UNIQUE,
+    [PasswordHash] VARCHAR(255) NOT NULL,
+    [Email] VARCHAR(100) NULL,
+    [CreatedDate] DATETIME2 DEFAULT GETDATE()
+);
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[SaveGames]') AND type in (N'U'))
-BEGIN
-    CREATE TABLE [dbo].[SaveGames] (
-        [SaveGameID] INT IDENTITY(1,1) PRIMARY KEY,
-        [PlayerID] INT NOT NULL FOREIGN KEY REFERENCES [dbo].[Players]([PlayerID]),
-        [Level] INT DEFAULT 1,
-        [ExperiencePoints] INT DEFAULT 0,
-        [CurrentHP] INT NOT NULL,
-        [MaxHP] INT NOT NULL,
-        [PositionX] DECIMAL(10,2) DEFAULT 0.0,
-        [PositionY] DECIMAL(10,2) DEFAULT 0.0,
-        [PositionZ] DECIMAL(10,2) DEFAULT 1.0, -- Usado para guardar el NIVEL DESBLOQUEADO
-        [LastSaved] DATETIME2 DEFAULT GETDATE()
-    );
-END
+-- TABLA PARTIDAS GUARDADAS
+CREATE TABLE [dbo].[SaveGames] (
+    [SaveGameID] INT IDENTITY(1,1) PRIMARY KEY,
+    [PlayerID] INT NOT NULL FOREIGN KEY REFERENCES [dbo].[Players]([PlayerID]),
+    [Level] INT DEFAULT 1,
+    [ExperiencePoints] INT DEFAULT 0,
+    [CurrentHP] INT NOT NULL,
+    [MaxHP] INT NOT NULL,
+    [PositionX] DECIMAL(10,2) DEFAULT 0.0,
+    [PositionY] DECIMAL(10,2) DEFAULT 0.0,
+    [PositionZ] DECIMAL(10,2) DEFAULT 1.0, -- Mapa Desbloqueado
+    [LastSaved] DATETIME2 DEFAULT GETDATE()
+);
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[MonsterCatalog]') AND type in (N'U'))
-BEGIN
-    CREATE TABLE [dbo].[MonsterCatalog] (
-        [MonsterID] INT IDENTITY(1,1) PRIMARY KEY,
-        [MonsterName] VARCHAR(100) NOT NULL,
-        [ElementID] INT NOT NULL,
-        [BaseHP] INT NOT NULL,
-        [BaseAttack] INT NOT NULL,
-        [BaseDefense] INT NOT NULL,
-        [BaseSpeed] INT NOT NULL,
-        [Description] VARCHAR(500) NULL
-    );
-END
+-- TABLA MONSTRUOS
+CREATE TABLE [dbo].[MonsterCatalog] (
+    [MonsterID] INT IDENTITY(1,1) PRIMARY KEY,
+    [MonsterName] VARCHAR(100) NOT NULL,
+    [ElementID] INT NOT NULL, -- FK Manual (Simulada para simplificar)
+    [BaseHP] INT NOT NULL,
+    [BaseAttack] INT NOT NULL,
+    [BaseDefense] INT NOT NULL,
+    [BaseSpeed] INT NOT NULL,
+    [Description] VARCHAR(500) NULL
+);
 GO
 
--- 2. DATOS INICIALES (AQUI ESTA LA CLAVE)
--- ---------------------------------------
+-- =====================================================
+-- INSERCIÓN DE DATOS (SEEDING)
+-- =====================================================
 
--- Elementos
-IF NOT EXISTS (SELECT * FROM Elements WHERE ElementName = 'Fire') INSERT INTO Elements VALUES ('Fire', 'Fuego');
-IF NOT EXISTS (SELECT * FROM Elements WHERE ElementName = 'Water') INSERT INTO Elements VALUES ('Water', 'Agua');
-IF NOT EXISTS (SELECT * FROM Elements WHERE ElementName = 'Plant') INSERT INTO Elements VALUES ('Plant', 'Planta');
+PRINT 'Insertando datos...';
 
--- MONSTRUOS (Borramos los viejos para asegurar que esten los del juego)
-DELETE FROM MonsterCatalog;
+-- Elementos (Especificando columnas para evitar error 213)
+INSERT INTO [dbo].[Elements] (ElementName, Description) VALUES 
+('Fire', 'Fuego'),
+('Water', 'Agua'),
+('Plant', 'Planta');
 
--- Insertamos los que usa el juego (Goblin, Brain, Shadow, Ogre)
-INSERT INTO MonsterCatalog (MonsterName, ElementID, BaseHP, BaseAttack, BaseDefense, BaseSpeed, Description)
+-- Monstruos (Los exactos que usa tu juego)
+INSERT INTO [dbo].[MonsterCatalog] (MonsterName, ElementID, BaseHP, BaseAttack, BaseDefense, BaseSpeed, Description)
 VALUES 
 ('Goblin', 3, 30, 5, 2, 2, 'Un habitante basico del bosque.'),
 ('Brain', 2, 20, 10, 0, 4, 'Enemigo psiquico que dispara energia.'),
 ('Shadow', 1, 50, 15, 5, 3, 'Se teletransporta y ataca rapido.'),
 ('Ogre', 1, 150, 25, 10, 1, 'El Jefe Final. Lento pero mortal.');
 
-PRINT 'Base de datos actualizada con los monstruos correctos.';
+PRINT '===========================================';
+PRINT '¡BASE DE DATOS REPARADA Y LISTA!';
+PRINT '===========================================';
 GO
-
--- 3. CONSULTA DE DEMOSTRACIÓN (Para el Profesor)
--- Copia y pega esto en una Nueva Consulta para enseñar el avance
-/*
-SELECT 
-    P.Username AS [Heroe], 
-    S.Level AS [Nivel], 
-    CAST(S.PositionZ AS INT) AS [Mapa Desbloqueado], 
-    S.ExperiencePoints AS [XP], 
-    S.CurrentHP AS [Vida], 
-    S.LastSaved AS [Ultimo Guardado]
-FROM SaveGames S
-INNER JOIN Players P ON S.PlayerID = P.PlayerID
-WHERE P.Username = 'Player1';
-*/
